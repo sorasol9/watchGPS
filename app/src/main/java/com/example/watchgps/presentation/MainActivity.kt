@@ -10,7 +10,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -19,20 +18,19 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
-import androidx.wear.compose.material.Button
-import androidx.wear.compose.material.MaterialTheme
-import androidx.wear.compose.material.Text
+import androidx.core.content.ContextCompat
+import androidx.wear.compose.material.*
+import androidx.wear.tooling.preview.devices.WearDevices
 import com.example.watchgps.presentation.theme.WatchGPSTheme
 import com.google.android.gms.location.*
-import androidx.wear.compose.material.TimeText
-import androidx.wear.tooling.preview.devices.WearDevices
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
 
-    // 위치 상태를 UI에 표시하기 위한 상태 변수
-    private val locationText = mutableStateOf("위치 정보 없음")
+    // Compose 상태를 위한 변수들
+    private var locationText by mutableStateOf("위치 정보 없음")
+    private var hasPermission by mutableStateOf(false)
 
     private val locationPermissions = arrayOf(
         Manifest.permission.ACCESS_FINE_LOCATION,
@@ -41,10 +39,14 @@ class MainActivity : ComponentActivity() {
 
     private val locationPermissionRequest by lazy {
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
-            if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
+            hasPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                    permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+
+            if (hasPermission) {
                 getLastLocation()
             } else {
-                locationText.value = "위치 권한이 필요합니다"
+                locationText = "위치 권한이 필요합니다"
+                Toast.makeText(this, "위치 권한이 거부되었습니다", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -54,45 +56,71 @@ class MainActivity : ComponentActivity() {
 
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
-        // 권한 요청 후 위치 요청
-        locationPermissionRequest.launch(locationPermissions)
+        // 현재 권한 상태 확인
+        checkCurrentPermissions()
 
         setContent {
             WearApp(
-                locationText = locationText.value,
-                onLocationRequest = { getLastLocation() }
+                locationText = locationText,
+                hasPermission = hasPermission,
+                onLocationRequest = { handleLocationRequest() }
             )
         }
     }
 
+    private fun checkCurrentPermissions() {
+        hasPermission = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.ACCESS_COARSE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+
+        if (hasPermission) {
+            getLastLocation()
+        }
+    }
+
+    private fun handleLocationRequest() {
+        if (hasPermission) {
+            getLastLocation()
+        } else {
+            locationPermissionRequest.launch(locationPermissions)
+        }
+    }
+
     private fun getLastLocation() {
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            locationText.value = "위치 권한 없음"
+        if (!hasPermission) {
+            locationText = "위치 권한 없음"
             return
         }
+
+        locationText = "위치 가져오는 중..."
 
         fusedLocationClient.lastLocation
             .addOnSuccessListener { location: Location? ->
                 location?.let {
-                    val lat = it.latitude
-                    val lon = it.longitude
-                    locationText.value = "위도: $lat\n경도: $lon"
+                    val lat = String.format("%.6f", it.latitude)
+                    val lon = String.format("%.6f", it.longitude)
+                    locationText = "위도: $lat\n경도: $lon"
+                    Toast.makeText(this, "위치 업데이트 완료", Toast.LENGTH_SHORT).show()
                 } ?: run {
-                    locationText.value = "위치 정보 없음"
+                    locationText = "위치 정보를 가져올 수 없습니다"
+                    Toast.makeText(this, "GPS를 켜주세요", Toast.LENGTH_SHORT).show()
                 }
             }
-            .addOnFailureListener {
-                locationText.value = "위치 가져오기 실패"
+            .addOnFailureListener { exception ->
+                locationText = "위치 가져오기 실패: ${exception.message}"
+                Toast.makeText(this, "위치 서비스 오류", Toast.LENGTH_SHORT).show()
             }
     }
 }
 
 @Composable
 fun WearApp(
-    greetingName: String,
-    onLocationRequest: () -> Unit,
     locationText: String,
-    hasPermission: Boolean
+    hasPermission: Boolean,
+    onLocationRequest: () -> Unit
 ) {
     WatchGPSTheme {
         Box(
@@ -103,60 +131,43 @@ fun WearApp(
         ) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(16.dp)
             ) {
-                TimeText()
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Greeting(greetingName = greetingName)
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Text(
-                    text = locationText,
-                    textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.body2
+                // 시간 표시
+                TimeText(
+                    modifier = Modifier.padding(bottom = 8.dp)
                 )
 
-                Spacer(modifier = Modifier.height(12.dp))
+                // 제목
+                Text(
+                    text = "GPS 위치 앱",
+                    style = MaterialTheme.typography.title3,
+                    color = MaterialTheme.colors.primary,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
 
-                Button(
-                    onClick = onLocationRequest,
-                    modifier = Modifier.fillMaxWidth(0.8f)
-                ) {
-                    Text(
-                        text = if (hasPermission) "GPS 위치 가져오기" else "권한 요청",
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun WearApp(
-    locationText: String,
-    onLocationRequest: () -> Unit
-) {
-    WatchGPSTheme {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                TimeText()
+                // 위치 정보 표시
                 Text(
                     text = locationText,
+                    style = MaterialTheme.typography.body2,
                     color = Color.White,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(8.dp)
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = onLocationRequest) {
-                    Text("GPS 위치 가져오기")
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // GPS 버튼
+                Button(
+                    onClick = onLocationRequest,
+                    modifier = Modifier.fillMaxWidth(0.9f)
+                ) {
+                    Text(
+                        text = if (hasPermission) "GPS 위치 가져오기" else "권한 요청하기",
+                        textAlign = TextAlign.Center
+                    )
                 }
             }
         }
@@ -166,15 +177,9 @@ fun WearApp(
 @Preview(device = WearDevices.SMALL_ROUND, showSystemUi = true)
 @Composable
 fun DefaultPreview() {
-    WearApp("위치 정보 없음", onLocationRequest = {})
-}
-
-@Composable
-fun Greeting(greetingName: String) {
-    Text(
-        text = "Hello $greetingName!",
-        color = Color.White,
-        textAlign = TextAlign.Center,
-        modifier = Modifier.padding(8.dp)
+    WearApp(
+        locationText = "위치 정보 없음",
+        hasPermission = false,
+        onLocationRequest = {}
     )
 }
