@@ -41,6 +41,9 @@ android {
 
 dependencies {
 
+    // 위치 관련 라이브러리
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+
     implementation(libs.play.services.wearable)
     implementation(platform(libs.compose.bom))
     implementation(libs.ui)
